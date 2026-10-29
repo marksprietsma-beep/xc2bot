@@ -113,8 +113,11 @@ class DiagnosticsTests(unittest.TestCase):
             store.finish_session(final_state="FIELD")
             self.assertIn('"event_type": "test_event"', (Path(temp) / "events.jsonl").read_text(encoding="utf-8"))
             import sqlite3
-            with sqlite3.connect(Path(temp) / "sessions.sqlite3") as db:
+            db = sqlite3.connect(Path(temp) / "sessions.sqlite3")
+            try:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
+            finally:
+                db.close()
 
     def test_environment_info_omits_machine_paths(self):
         info = environment_info()
