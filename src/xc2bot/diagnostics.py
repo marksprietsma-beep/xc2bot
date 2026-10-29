@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+from contextlib import contextmanager
 import re
 import sqlite3
 import sys
@@ -13,7 +14,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from . import __version__
 from .config import Settings
@@ -22,6 +23,25 @@ _SECRET_KEY = re.compile(r"(token|password|secret|api[_-]?key|authorization|cook
 _WINDOWS_PATH = re.compile(r"\b[A-Za-z]:\\(?:[^\\\s]+\\?)*")
 _UNIX_PATH = re.compile(r"(?<!\w)/(?:home|Users|workspace|private|tmp|mnt)/[^\s\"']+")
 _BEARER = re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+@contextmanager
+def _connect(database: str | Path) -> Iterator[sqlite3.Connection]:
+    """Open a SQLite connection that commits/rolls back and always closes.
+
+    sqlite3.Connection's context manager handles transactions but does not
+    close the connection, which can prevent temporary database files being
+    removed on Windows.
+    """
+    connection = sqlite3.connect(database)
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def utc_now() -> str:
@@ -58,7 +78,7 @@ class DiagnosticStore:
         self.database_path = self.root / "sessions.sqlite3"
         self._lock = threading.RLock()
         try:
-            with sqlite3.connect(self.database_path) as db:
+            with _connect(self.database_path) as db:
                 db.execute("PRAGMA journal_mode=WAL")
                 db.execute("""CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL,
@@ -106,7 +126,7 @@ class DiagnosticStore:
             try:
                 with self.events_path.open("a", encoding="utf-8", newline="\n") as handle:
                     handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-                with sqlite3.connect(self.database_path) as db:
+                with _connect(self.database_path) as db:
                     db.execute(
                         """INSERT INTO events(session_id, timestamp, event_type, state, action, result,
                            elapsed_seconds, retry_count, details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -130,7 +150,7 @@ class DiagnosticStore:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             try:
-                with sqlite3.connect(self.database_path) as db:
+                with _connect(self.database_path) as db:
                     db.commit()
                     session_row = db.execute(
                         "SELECT session_id, started_at, ended_at, final_state, status FROM sessions WHERE session_id=?",
@@ -180,7 +200,7 @@ class DiagnosticStore:
                                     safe_events.append(json.dumps(redact(item), ensure_ascii=False, sort_keys=True))
                         (temp / "events.jsonl").write_text("\n".join(safe_events) + ("\n" if safe_events else ""), encoding="utf-8")
                         safe_db = temp / "sessions.sqlite3"
-                        with sqlite3.connect(safe_db) as destination:
+                        with _connect(safe_db) as destination:
                             db.backup(destination)
                         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                             for filename in ("summary.json", "events.jsonl", "config.json", "environment.json", "sessions.sqlite3"):
