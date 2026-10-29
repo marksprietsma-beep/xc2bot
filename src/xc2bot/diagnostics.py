@@ -138,7 +138,7 @@ class DiagnosticStore:
         return event
 
     def finish_session(self, *, final_state: str, status: str = "completed") -> None:
-        with self._lock, sqlite3.connect(self.database_path) as db:
+        with self._lock, _connect(self.database_path) as db:
             db.execute(
                 "UPDATE sessions SET ended_at=?, final_state=?, status=? WHERE session_id=?",
                 (utc_now(), final_state, status, self.session_id),
