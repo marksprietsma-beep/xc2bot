@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 from xc2bot.config import Settings, load_settings
-from xc2bot.diagnostics import DiagnosticStore, redact
+from xc2bot.diagnostics import DiagnosticStore, environment_info, redact
 from xc2bot.interfaces import MockController, MockEmulator, MockScreenCapture
 from xc2bot.safety import ActionTimeout, SafetyController, SafetyStop
 from xc2bot.simulator import run_simulation
@@ -115,6 +115,13 @@ class DiagnosticsTests(unittest.TestCase):
             import sqlite3
             with sqlite3.connect(Path(temp) / "sessions.sqlite3") as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM events").fetchone()[0], 1)
+
+    def test_environment_info_omits_machine_paths(self):
+        info = environment_info()
+        self.assertIn("python_version", info)
+        self.assertNotIn("home", info)
+        self.assertNotIn("username", info)
+        self.assertNotIn("cwd", info)
 
     def test_redacts_secret_and_windows_path(self):
         result = redact({"api_key": "abc123", "message": r"failed at C:\Users\Mark\private.txt"})
