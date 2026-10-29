@@ -1,0 +1,8 @@
+{
+  "log_dir": "artifacts/logs",
+  "max_session_seconds": 3600,
+  "action_timeout_seconds": 10,
+  "max_consecutive_errors": 3,
+  "max_retries": 2,
+  "include_screenshots_in_export": false
+}
