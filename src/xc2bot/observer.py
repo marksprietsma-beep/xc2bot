@@ -10,7 +10,11 @@ from uuid import uuid4
 
 from .config import Settings
 from .diagnostics import DiagnosticStore
-from .window_capture import WindowInfo, WindowsWindowProvider
+from .window_capture import (
+    WindowInfo,
+    WindowNotForegroundError as CaptureWindowNotForegroundError,
+    WindowsWindowProvider,
+)
 
 
 DEFAULT_GAME_TITLE = "Xenoblade Chronicles 2"
@@ -101,10 +105,8 @@ def observe_once(
     if activate:
         try:
             selected = active_provider.activate_window(selected)
-        except Exception as exc:
-            if "foreground" in type(exc).__name__.casefold():
-                raise GameWindowNotForegroundError(str(exc)) from exc
-            raise
+        except CaptureWindowNotForegroundError as exc:
+            raise GameWindowNotForegroundError(str(exc)) from exc
     elif selected.is_minimized:
         raise ObservationError("The XC2 game window is minimized. Restore it and retry.")
     elif not selected.is_foreground:
