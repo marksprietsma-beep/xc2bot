@@ -63,3 +63,31 @@
 4. Only after manual input is reliable, consider a small sequence of individually bounded actions.
 5. Collect representative screenshots before implementing game-state recognition.
 6. Keep story progression under user control; stop on uncertain state.
+
+
+## Implemented in Stage 2C — bounded manual action sequences
+
+- Added xc2bot sequence --mapping ... --plan ... --confirm.
+- Added strict JSON plan validation before any emulator window is activated or input is sent.
+- A plan contains 1–8 named semantic actions; each action is a single mapped key, held for 0.05–1.00 seconds.
+- Hard limits: 5 seconds aggregate key-hold time, 2 seconds per inter-step delay, 10 seconds aggregate delay, 15 seconds planned duration and 45 seconds measured runtime.
+- Requires explicit operator confirmation; there are no loops, retries, simultaneous keypresses or unbounded macros.
+- Every action reuses the Stage 2B activation, focus-check, emergency-stop, key-release and before/after screenshot path.
+- A parent sequence diagnostic session records each step and links it to the individual child action session IDs and screenshot filenames.
+- Emergency stop and focus are checked between steps and during inter-step waits; focus loss or stop cancels all remaining steps.
+- Added config/sequence.example.json for a short four-direction movement test.
+- Added unit tests for plan validation, action execution, screenshots, linked diagnostics, explicit confirmation, focus-loss abort and emergency-stop abort.
+
+## Stage 2C Windows acceptance procedure
+
+1. Update the local project from recovery/stage-1-foundation and retain .venv and config/keyboard.json.
+2. Run .\\.venv\\Scripts\\python.exe -m xc2bot test.
+3. Launch XC2, load a save and move Rex to a clear, safe area.
+4. Run .\\.venv\\Scripts\\python.exe -m xc2bot sequence --mapping config\\keyboard.json --plan config\\sequence.example.json --confirm.
+5. Verify that each of the four short movements occurs, that the sequence stops after one pass, and that the output lists four child action results.
+6. Inspect the parent sequence session and child sessions in artifacts\\logs\\events.jsonl, sessions.sqlite3, and the before/after screenshots.
+7. If the character does not move as expected, do not repeat the sequence; inspect the screenshots and logs first.
+
+## Stage 2C safety boundary
+
+Stage 2C is a manually initiated, one-pass action sequence only. It does not observe game state, make decisions, select enemies, fight, farm, loop, retry, or progress the story. Stage 3 must add read-only game-state recognition and an operator-visible confidence/unknown state before any combat behaviour is considered.
