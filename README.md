@@ -25,7 +25,7 @@ A Windows-first Python foundation for a future Xenoblade Chronicles 2 farming bo
 
 - Loads semantic action-to-key mappings from a local JSON file.
 - Sends one Windows virtual-key press through SendInput.
-- Requires the Ryujinx game window to already be foreground; it never steals focus.
+- Automatically restores and activates the uniquely matched Ryujinx game window when the command is launched from PowerShell.
 - Checks focus during the hold and sends a matching key-up in a finally cleanup path.
 - Requires the explicit --confirm flag.
 - Hard-limits each key hold to 0.05–1.00 seconds.
@@ -66,8 +66,7 @@ Show the loaded mapping:
 ## One manually confirmed input action
 
 1. Unpause XC2 and place the character somewhere safe.
-2. Click the actual Ryujinx game window so it is the foreground window.
-3. Run exactly one short test:
+2. Run exactly one short test from PowerShell. The command finds and activates the configured Ryujinx game window itself; you do not need to click it first:
 
     .\.venv\Scripts\python.exe -m xc2bot input --mapping config\keyboard.json --action MOVE_FORWARD --duration 0.25 --confirm
 
@@ -80,7 +79,7 @@ The command:
 
 **Safety limits:** one key per command, no modifiers or key combinations, no repeats, maximum hold 1.00 second, foreground-window verification, and an explicit --confirm acknowledgement. Press **Ctrl+Alt+F12** during a hold to request an emergency stop; **Ctrl+C** also interrupts the command. The controller attempts to release any key it has pressed on every exit path.
 
-If the emulator loses focus, the action stops and the key is released. The command does not activate or restore the emulator automatically. Run PowerShell and Ryujinx at the same privilege level; Windows may reject SendInput if their elevation levels differ.
+The command activates the matching Ryujinx window before taking the before screenshot and sending input. If Windows refuses to activate it, the command fails closed and sends no key. If the emulator loses focus during the hold, the action stops and the key is released. Run PowerShell and Ryujinx at the same privilege level; Windows may reject SendInput if their elevation levels differ.
 
 ## Commands
 
@@ -97,7 +96,7 @@ Generated logs, databases and screenshots are written under artifacts/logs by de
 
 ## Observation and input limitations
 
-Screenshots use visible desktop pixels inside the game's Windows client rectangle. The game window must be visible and unobscured; this is not off-screen capture. Keyboard input goes to the current foreground application, so the tool verifies the matching Ryujinx window immediately before and during a hold. This remains a best-effort desktop automation boundary: it is not a direct emulator-control API.
+Screenshots use visible desktop pixels inside the game's Windows client rectangle. The game window must be visible and unobscured; this is not off-screen capture. Keyboard input goes to the current foreground application, so the tool activates the matching Ryujinx window and verifies it immediately before and during a hold. This remains a best-effort desktop automation boundary: it is not a direct emulator-control API.
 
 Synchronous timeouts are detected only after a blocking action returns. Stage 2B's short one-shot hold is bounded, but unattended operation is not supported. There is no game-state recognition, combat strategy, target selection, or automatic recovery yet.
 
