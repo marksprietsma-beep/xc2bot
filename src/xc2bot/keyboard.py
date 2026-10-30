@@ -27,6 +27,8 @@ _KEY_CODES: dict[str, int] = {
     "TAB": 0x09,
     "BACKSPACE": 0x08,
     "ESC": 0x1B,
+    "PLUS": 0xBB,   # VK_OEM_PLUS
+    "MINUS": 0xBD,  # VK_OEM_MINUS
     "UP": 0x26,
     "DOWN": 0x28,
     "LEFT": 0x25,
