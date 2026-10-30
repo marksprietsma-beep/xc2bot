@@ -34,6 +34,23 @@ A Windows-first Python foundation for a future Xenoblade Chronicles 2 farming bo
 
 Stage 2B is a **manual one-action test interface**, not an unattended bot. It does not repeat actions, identify game states, choose targets, run combat, automate Core Crystal collection, or progress the story. Diagnostic ZIP exports continue to exclude screenshots by default.
 
+### Stage 2C — bounded manual action sequences
+
+- Runs a JSON plan containing 1–8 sequential, single-key actions.
+- Every action requires a configured semantic mapping and a 0.05–1.00 second hold.
+- Hard limits: 5 seconds total key-hold time, 2 seconds per inter-step delay, 10 seconds total delay, 15 seconds total planned time and 45 seconds maximum measured runtime.
+- Requires an explicit --confirm acknowledgement for every sequence.
+- Captures before/after screenshots for each action and records per-action child sessions.
+- Creates a parent sequence diagnostic session linking each action session and its screenshot filenames.
+- Checks the emergency-stop chord and emulator foreground focus between actions; a failure aborts all remaining steps.
+- No loops, retries, simultaneous keys, combat decisions, target selection or story progression.
+
+Run the supplied short movement plan from PowerShell:
+
+    .\\.venv\\Scripts\\python.exe -m xc2bot sequence --mapping config\\keyboard.json --plan config\\sequence.example.json --confirm
+
+The example performs four short directional movements. Test it only in an open, safe area. The sequence is manually initiated and runs once; it is not an unattended farming loop.
+
 ## Requirements
 
 - Windows 10/11 (Windows 11 is the target operating system).
@@ -90,6 +107,7 @@ The command activates the matching Ryujinx window before taking the before scree
 - xc2bot observe --window-title "Ryujinx 1.3.3" — capture the emulator window once; sends no game input.
 - xc2bot controls --mapping config\keyboard.json — display configured semantic keyboard mappings.
 - xc2bot input ... --confirm — send one bounded mapped key action, with before/after screenshots.
+- xc2bot sequence --mapping ... --plan ... --confirm — execute a validated, bounded sequence once, with screenshots and linked diagnostics for every step.
 - xc2bot export --output artifacts\diagnostics.zip — export five diagnostic files: summary, JSONL events, configuration, environment information and SQLite database. Screenshots are excluded by default.
 
 Generated logs, databases and screenshots are written under artifacts/logs by default and are git-ignored.
@@ -98,7 +116,7 @@ Generated logs, databases and screenshots are written under artifacts/logs by de
 
 Screenshots use visible desktop pixels inside the game's Windows client rectangle. The game window must be visible and unobscured; this is not off-screen capture. Keyboard input goes to the current foreground application, so the tool activates the matching Ryujinx window and verifies it immediately before and during a hold. This remains a best-effort desktop automation boundary: it is not a direct emulator-control API.
 
-Synchronous timeouts are detected only after a blocking action returns. Stage 2B's short one-shot hold is bounded, but unattended operation is not supported. There is no game-state recognition, combat strategy, target selection, or automatic recovery yet.
+Synchronous timeouts are detected only after a blocking action returns. Stage 2B's one-shot hold and Stage 2C's manually initiated sequence are bounded; unattended operation is not supported. There is no game-state recognition, combat strategy, target selection, or automatic recovery yet.
 
 See docs/CONTINUATION.md for the continuation checkpoint.
 
