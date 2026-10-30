@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 import os
 import ctypes
@@ -23,7 +24,7 @@ from xc2bot.keyboard import (
     resolve_action_key,
     validate_hold_duration,
 )
-from xc2bot.window_capture import WindowInfo
+from xc2bot.window_capture import WindowInfo, WindowNotForegroundError
 
 
 class FakeSender:
@@ -60,11 +61,17 @@ class FakeWindowProvider:
             is_minimized=False,
         )
         self.captures: list[Path] = []
+        self.activated: list[int] = []
 
     def find_windows(self, title_contains: str) -> list[WindowInfo]:
         if title_contains.casefold() in self.window.title.casefold():
             return [self.window]
         return []
+
+    def activate_window(self, window: WindowInfo) -> WindowInfo:
+        self.activated.append(window.handle)
+        self.window = replace(self.window, is_foreground=True, is_minimized=False)
+        return self.window
 
     def capture_window(self, window: WindowInfo, output_path: str | Path) -> tuple[int, int]:
         output = Path(output_path)
@@ -215,6 +222,7 @@ class KeyboardActionTests(unittest.TestCase):
             self.assertEqual(result.key, "W")
             self.assertIsNotNone(result.after_screenshot)
             self.assertEqual(len(provider.captures), 2)
+            self.assertEqual(provider.activated, [])
             self.assertEqual(controller.actions, [("W", 0.25)])
             self.assertGreaterEqual(controller.release_calls, 1)
             lines = (Path(temp) / "events.jsonl").read_text(encoding="utf-8").splitlines()
@@ -242,9 +250,31 @@ class KeyboardActionTests(unittest.TestCase):
             self.assertEqual(provider.captures, [])
 
 
-    def test_action_rejected_if_emulator_is_not_foreground(self):
+    def test_action_automatically_activates_ryujinx_when_terminal_has_focus(self):
         with tempfile.TemporaryDirectory() as temp:
             provider = FakeWindowProvider(foreground=False)
+            controller = FakeController()
+            result = perform_mapped_action(
+                Settings(log_dir=temp),
+                mapping_path=self._mapping(temp),
+                action="MOVE_FORWARD",
+                duration_seconds=0.25,
+                confirmed=True,
+                provider=provider,
+                controller=controller,
+            )
+            self.assertEqual(provider.activated, [123])
+            self.assertEqual(controller.actions, [("W", 0.25)])
+            self.assertIsNotNone(result.after_screenshot)
+            self.assertEqual(len(provider.captures), 2)
+
+    def test_action_fails_closed_if_windows_denies_activation(self):
+        class FailingActivationProvider(FakeWindowProvider):
+            def activate_window(self, window: WindowInfo) -> WindowInfo:
+                raise WindowNotForegroundError("activation denied")
+
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FailingActivationProvider(foreground=False)
             controller = FakeController()
             with self.assertRaises(TargetWindowNotForeground):
                 perform_mapped_action(
