@@ -4,6 +4,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+import os
+import ctypes
 
 from xc2bot.actions import (
     TargetWindowNotForeground,
@@ -14,6 +16,8 @@ from xc2bot.keyboard import (
     EmergencyStopRequested,
     KeyboardControlError,
     WindowsKeyboardController,
+    WindowsSendInputSender,
+    _INPUT,
     load_keyboard_mapping,
     resolve_action_key,
     validate_hold_duration,
@@ -147,6 +151,29 @@ class KeyboardControllerTests(unittest.TestCase):
             controller.press("W", 0.5, focus_check=lambda: next(focus_values))
         self.assertEqual(sender.events, [("W", True), ("W", False)])
 
+
+    @unittest.skipUnless(os.name == "nt", "Windows SendInput structure test")
+    def test_windows_sender_builds_key_event_without_sending_to_desktop(self):
+        sender = WindowsSendInputSender()
+
+        class FakeUser32:
+            def __init__(self):
+                self.events = []
+
+            def SendInput(self, count, pointer, size):
+                event = ctypes.cast(pointer, ctypes.POINTER(_INPUT)).contents
+                self.events.append((count, size, event.type, event.ki.wVk, event.ki.dwFlags))
+                return 1
+
+        fake_user32 = FakeUser32()
+        sender._user32 = fake_user32
+        sender.send_key("W", key_down=True)
+        sender.send_key("W", key_down=False)
+        self.assertEqual(fake_user32.events[0][0], 1)
+        self.assertEqual(fake_user32.events[0][2:], (1, ord("W"), 0))
+        self.assertEqual(fake_user32.events[1][2:], (1, ord("W"), WindowsSendInputSender.KEYEVENTF_KEYUP))
+
+
     def test_no_input_when_emergency_stop_already_pressed(self):
         sender = FakeSender()
         controller = WindowsKeyboardController(
@@ -176,6 +203,7 @@ class KeyboardActionTests(unittest.TestCase):
                 mapping_path=self._mapping(temp),
                 action="MOVE_FORWARD",
                 duration_seconds=0.25,
+                confirmed=True,
                 provider=provider,
                 controller=controller,
             )
@@ -190,6 +218,25 @@ class KeyboardActionTests(unittest.TestCase):
             self.assertIn("keyboard_action_completed", events)
             self.assertEqual(events.count("screenshot_captured"), 2)
 
+
+    def test_action_requires_explicit_confirmation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            provider = FakeWindowProvider()
+            controller = FakeController()
+            with self.assertRaises(ValueError):
+                perform_mapped_action(
+                    Settings(log_dir=temp),
+                    mapping_path=self._mapping(temp),
+                    action="MOVE_FORWARD",
+                    duration_seconds=0.25,
+                    confirmed=False,
+                    provider=provider,
+                    controller=controller,
+                )
+            self.assertEqual(controller.actions, [])
+            self.assertEqual(provider.captures, [])
+
+
     def test_action_rejected_if_emulator_is_not_foreground(self):
         with tempfile.TemporaryDirectory() as temp:
             provider = FakeWindowProvider(foreground=False)
@@ -200,6 +247,7 @@ class KeyboardActionTests(unittest.TestCase):
                     mapping_path=self._mapping(temp),
                     action="MOVE_FORWARD",
                     duration_seconds=0.25,
+                    confirmed=True,
                     provider=provider,
                     controller=controller,
                 )
