@@ -1,4 +1,4 @@
-"""Command-line interface for diagnostics, observation and mock validation."""
+"""Command-line interface for diagnostics, observation and manual input tests."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ from contextlib import closing
 from pathlib import Path
 
 from . import __version__
+from .actions import perform_mapped_action
 from .config import Settings, load_settings
 from .diagnostics import DiagnosticStore, environment_info
+from .keyboard import EMERGENCY_STOP_LABEL, MAX_HOLD_SECONDS, load_keyboard_mapping
 from .observer import DEFAULT_GAME_TITLE, find_game_windows, observe_once
 from .simulator import run_simulation
 
@@ -28,7 +30,7 @@ def _settings(args: argparse.Namespace) -> Settings:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xc2bot",
-        description="XC2 farming bot foundation: read-only Windows observer and offline mock tools",
+        description="XC2 bot foundation: read-only observation and manually confirmed, bounded keyboard tests",
     )
     parser.add_argument("--version", action="version", version=f"xc2bot {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -46,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     export = sub.add_parser("export", help="export a safe diagnostic ZIP for the latest session")
     export.add_argument("--output", required=True, help="output ZIP path")
     export.add_argument("--config", help="optional JSON configuration file")
-    export.add_argument("--log-dir", help="override log directory")
+    export.add_argument("--log-dir", help="override diagnostic log directory")
 
     windows = sub.add_parser("windows", help="list visible windows whose title matches XC2")
     windows.add_argument("--window-title", default=DEFAULT_GAME_TITLE, help="case-insensitive title substring")
@@ -60,6 +62,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not bring the game window to the foreground; capture only if it is already active",
     )
+
+    controls = sub.add_parser("controls", help="show the configured semantic-to-keyboard mapping")
+    controls.add_argument("--mapping", required=True, help="path to a keyboard mapping JSON file")
+
+    input_action = sub.add_parser(
+        "input",
+        help="send one manually confirmed key action to the already-foreground Ryujinx window",
+    )
+    input_action.add_argument("--mapping", required=True, help="path to a keyboard mapping JSON file")
+    input_action.add_argument("--action", required=True, help="semantic action name from the mapping file")
+    input_action.add_argument("--duration", required=True, type=float, help=f"key hold in seconds (maximum {MAX_HOLD_SECONDS:.1f})")
+    input_action.add_argument("--window-title", help="override the title substring in the mapping file")
+    input_action.add_argument("--log-dir", help="override diagnostic log directory")
+    input_action.add_argument(
+        "--confirm",
+        action="store_true",
+        required=True,
+        help="required acknowledgement: send one key to the foreground emulator window",
+    )
+
     return parser
 
 
@@ -109,6 +131,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result.as_dict(), indent=2))
             return 0
+        if args.command == "controls":
+            mapping = load_keyboard_mapping(args.mapping)
+            print(json.dumps({
+                "window_title_contains": mapping.window_title_contains,
+                "emergency_stop": EMERGENCY_STOP_LABEL,
+                "maximum_hold_seconds": MAX_HOLD_SECONDS,
+                "mappings": mapping.mappings,
+            }, indent=2))
+            return 0
+        if args.command == "input":
+            settings = _settings(args)
+            result = perform_mapped_action(
+                settings,
+                mapping_path=args.mapping,
+                action=args.action,
+                duration_seconds=args.duration,
+                window_title=args.window_title,
+            )
+            print(json.dumps(result.as_dict(), indent=2))
+            return 0
         if args.command == "export":
             settings = _settings(args)
             log_dir = Path(settings.log_dir)
@@ -127,6 +169,13 @@ def main(argv: list[str] | None = None) -> int:
             output = store.export_bundle(args.output)
             print(json.dumps({"output": str(output), "bytes": output.stat().st_size, "session_id": row[0]}, indent=2))
             return 0
+    except KeyboardInterrupt:
+        print(
+            f"Interrupted. The controller's cleanup attempted to release held keys. "
+            f"The emergency stop is {EMERGENCY_STOP_LABEL}.",
+            file=sys.stderr,
+        )
+        return 130
     except Exception as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
