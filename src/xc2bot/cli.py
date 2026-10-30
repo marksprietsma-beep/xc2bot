@@ -147,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
                 mapping_path=args.mapping,
                 action=args.action,
                 duration_seconds=args.duration,
+                confirmed=args.confirm,
                 window_title=args.window_title,
             )
             print(json.dumps(result.as_dict(), indent=2))
