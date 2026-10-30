@@ -171,6 +171,17 @@ class WindowsEmergencyStopProbe:
         )
 
 
+class _MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = [
         ("wVk", wintypes.WORD),
@@ -181,8 +192,23 @@ class _KEYBDINPUT(ctypes.Structure):
     ]
 
 
+class _HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
 class _INPUTUNION(ctypes.Union):
-    _fields_ = [("ki", _KEYBDINPUT)]
+    # INPUT contains the complete Win32 union, not just KEYBDINPUT. The
+    # MOUSEINPUT member is the largest member and determines cbSize on both
+    # 32-bit and 64-bit Windows (28 and 40 bytes respectively for INPUT).
+    _fields_ = [
+        ("mi", _MOUSEINPUT),
+        ("ki", _KEYBDINPUT),
+        ("hi", _HARDWAREINPUT),
+    ]
 
 
 class _INPUT(ctypes.Structure):
@@ -221,10 +247,18 @@ class WindowsSendInputSender:
         sent = self._user32.SendInput(1, ctypes.byref(input_event), ctypes.sizeof(_INPUT))
         if sent != 1:
             error = ctypes.get_last_error()
-            explanation = (
-                f"Windows SendInput failed for {name} (error {error}). "
-                "Check that Ryujinx and this PowerShell process are running at the same privilege level."
-            )
+            if error == 87:
+                explanation = (
+                    f"Windows SendInput rejected the INPUT structure for {name} (error 87: "
+                    "ERROR_INVALID_PARAMETER). The ctypes structure size/layout is invalid."
+                )
+            elif error == 5:
+                explanation = (
+                    f"Windows SendInput was denied for {name} (error 5: ACCESS_DENIED). "
+                    "Check that Ryujinx and this PowerShell process are running at the same privilege level."
+                )
+            else:
+                explanation = f"Windows SendInput failed for {name} (error {error})."
             raise KeyboardControlError(explanation)
 
 
