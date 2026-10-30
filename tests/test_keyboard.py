@@ -100,6 +100,10 @@ class KeyboardMappingTests(unittest.TestCase):
             self.assertEqual(mapping.window_title_contains, "Ryujinx 1.3.3")
             self.assertEqual(resolve_action_key(mapping, "MOVE_FORWARD"), "W")
             self.assertEqual(resolve_action_key(mapping, "confirm"), "ENTER")
+            path.write_text(json.dumps({"mappings": {"plus": "PLUS", "minus": "MINUS"}}), encoding="utf-8")
+            punctuation_mapping = load_keyboard_mapping(path)
+            self.assertEqual(resolve_action_key(punctuation_mapping, "plus"), "PLUS")
+            self.assertEqual(resolve_action_key(punctuation_mapping, "minus"), "MINUS")
 
     def test_rejects_modifier_and_emergency_keys(self):
         with tempfile.TemporaryDirectory() as temp:
