@@ -22,3 +22,6 @@ logs/
 !.env.example
 local-config.json
 screenshots/
+
+# Local Ryujinx keyboard mapping (personal machine-specific controls)
+config/keyboard.json
