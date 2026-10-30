@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ctypes
-import json
 import math
 import os
 import re
@@ -12,6 +11,8 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
+
+from .json_config import decode_config
 
 
 MIN_HOLD_SECONDS = 0.05
@@ -93,7 +94,7 @@ def normalise_key_name(key: str) -> str:
 def validate_hold_duration(duration_seconds: float) -> float:
     try:
         duration = float(duration_seconds)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("Hold duration must be a number") from exc
     if not math.isfinite(duration):
         raise ValueError("Hold duration must be finite")
@@ -108,11 +109,11 @@ def validate_hold_duration(duration_seconds: float) -> float:
 def load_keyboard_mapping(path: str | Path) -> KeyboardMapping:
     mapping_path = Path(path)
     try:
-        raw = json.loads(mapping_path.read_text(encoding="utf-8"))
+        raw = decode_config(mapping_path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise ValueError(f"Cannot read keyboard mapping file: {mapping_path}") from exc
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Keyboard mapping file is not valid JSON: {mapping_path}") from exc
+    except ValueError as exc:
+        raise ValueError(f"Keyboard mapping file is not valid unambiguous JSON: {exc}") from exc
 
     if not isinstance(raw, dict):
         raise ValueError("Keyboard mapping must be a JSON object")
@@ -294,9 +295,13 @@ class WindowsKeyboardController:
         if not focus_check():
             raise TargetWindowFocusLost("Ryujinx is not the foreground window; no key was sent.")
 
-        self._sender.send_key(name, key_down=True)
+        if self._pressed:
+            raise KeyboardControlError("A previous key release is unresolved; no new key was sent.")
+        # Track before calling the sender: it may inject successfully and then
+        # raise (including Ctrl+C) before returning to Python.
         self._pressed.add(name)
         try:
+            self._sender.send_key(name, key_down=True)
             deadline = self._clock() + duration
             while True:
                 if self._emergency_stop.is_pressed():
@@ -319,7 +324,7 @@ class WindowsKeyboardController:
                 self._sender.send_key(key, key_down=False)
             except Exception as exc:
                 errors.append(exc)
-            finally:
+            else:
                 self._pressed.discard(key)
         if errors:
             raise KeyboardControlError(

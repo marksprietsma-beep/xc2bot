@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from dataclasses import asdict, dataclass
@@ -10,13 +9,18 @@ from pathlib import Path
 from typing import Callable, Protocol
 from uuid import uuid4
 
-from .actions import KeyboardActionResult, perform_mapped_action
+from .actions import (
+    ActionWindowProvider, KeyboardActionResult, KeyboardController,
+    _select_target_window, perform_mapped_action,
+)
 from .config import Settings
 from .diagnostics import DiagnosticStore
+from .json_config import decode_config
 from .keyboard import (
     EmergencyStopProbe,
     KeyboardMapping,
     WindowsEmergencyStopProbe,
+    WindowsKeyboardController,
     load_keyboard_mapping,
     resolve_action_key,
     validate_hold_duration,
@@ -41,8 +45,8 @@ class SequenceSafetyError(ActionSequenceError):
     """Raised when focus, emergency-stop or runtime checks abort a sequence."""
 
 
-class SequenceWindowProvider(Protocol):
-    def find_windows(self, title_contains: str) -> list[WindowInfo]: ...
+class SequenceWindowProvider(ActionWindowProvider, Protocol):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +95,11 @@ def load_action_sequence(
     """Load and fully validate a sequence before any game input is attempted."""
     plan_path = Path(path)
     try:
-        raw = json.loads(plan_path.read_text(encoding="utf-8"))
+        raw = decode_config(plan_path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise ActionSequenceError(f"Cannot read sequence plan: {plan_path}") from exc
-    except json.JSONDecodeError as exc:
-        raise ActionSequenceError(f"Sequence plan is not valid JSON: {plan_path}") from exc
+    except ValueError as exc:
+        raise ActionSequenceError(f"Sequence plan is not valid unambiguous JSON: {exc}") from exc
 
     if not isinstance(raw, dict):
         raise ActionSequenceError("Sequence plan must be a JSON object")
@@ -147,7 +151,10 @@ def load_action_sequence(
         delay_value = raw_step.get("delay_after_seconds", 0.0)
         if isinstance(delay_value, bool) or not isinstance(delay_value, (int, float)):
             raise ActionSequenceError(f"Step {index} delay_after_seconds must be a number")
-        delay = float(delay_value)
+        try:
+            delay = float(delay_value)
+        except OverflowError as exc:
+            raise ActionSequenceError(f"Step {index} delay_after_seconds is too large") from exc
         if not math.isfinite(delay) or delay < 0 or delay > MAX_SEQUENCE_STEP_DELAY_SECONDS:
             raise ActionSequenceError(
                 f"Step {index} delay_after_seconds must be between 0 and "
@@ -178,11 +185,12 @@ def _assert_sequence_focus(
     provider: SequenceWindowProvider,
     title: str,
     process_id: int,
+    window_handle: int,
 ) -> None:
     matches = [
         window
         for window in provider.find_windows(title)
-        if window.process_id == process_id
+        if window.process_id == process_id and window.handle == window_handle
     ]
     if len(matches) != 1 or not matches[0].is_foreground or matches[0].is_minimized:
         raise SequenceSafetyError(
@@ -196,6 +204,7 @@ def _wait_between_actions(
     provider: SequenceWindowProvider,
     title: str,
     process_id: int,
+    window_handle: int,
     emergency_stop: EmergencyStopProbe,
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
@@ -205,11 +214,11 @@ def _wait_between_actions(
     while True:
         if emergency_stop.is_pressed():
             raise SequenceSafetyError("Emergency stop pressed between actions; sequence cancelled.")
-        if clock() - sequence_started > MAX_SEQUENCE_RUNTIME_SECONDS:
+        if clock() - sequence_started >= MAX_SEQUENCE_RUNTIME_SECONDS:
             raise SequenceSafetyError(
                 f"Sequence exceeded its {MAX_SEQUENCE_RUNTIME_SECONDS:.0f}-second runtime limit."
             )
-        _assert_sequence_focus(provider, title, process_id)
+        _assert_sequence_focus(provider, title, process_id, window_handle)
         remaining = deadline - clock()
         if remaining <= 0:
             return
@@ -224,7 +233,7 @@ def run_action_sequence(
     confirmed: bool = False,
     window_title: str | None = None,
     provider: SequenceWindowProvider | None = None,
-    controller=None,
+    controller: KeyboardController | None = None,
     emergency_stop: EmergencyStopProbe | None = None,
     clock: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
@@ -241,18 +250,29 @@ def run_action_sequence(
 
     mapping = load_keyboard_mapping(mapping_path)
     plan = load_action_sequence(plan_path, mapping)
-    title = (window_title or mapping.window_title_contains).strip()
+    title = (mapping.window_title_contains if window_title is None else window_title).strip()
     if not title:
         raise ActionSequenceError("window title match must not be empty")
 
     active_provider = provider or WindowsWindowProvider()
     stop_probe = emergency_stop or WindowsEmergencyStopProbe()
+    active_controller = controller or WindowsKeyboardController(
+        emergency_stop=stop_probe, clock=clock, sleeper=sleeper,
+    )
     sequence_id = f"sequence-{uuid4().hex[:12]}"
     store = DiagnosticStore(settings.log_dir, settings, session_id=sequence_id)
     sequence_started = clock()
     completed_results: list[KeyboardActionResult] = []
-    previous_process_id: int | None = None
     failed_step_index: int | None = None
+    child_session_id: str | None = None
+
+    def check_safety() -> None:
+        if stop_probe.is_pressed():
+            raise SequenceSafetyError("Emergency stop pressed; remaining actions were cancelled.")
+        if clock() - sequence_started >= MAX_SEQUENCE_RUNTIME_SECONDS:
+            raise SequenceSafetyError(
+                f"Sequence exceeded its {MAX_SEQUENCE_RUNTIME_SECONDS:.0f}-second runtime limit."
+            )
 
     store.log_event(
         "sequence_started",
@@ -271,17 +291,16 @@ def run_action_sequence(
     )
 
     try:
+        check_safety()
+        target = _select_target_window(active_provider, title)
         for index, step in enumerate(plan.steps, start=1):
             failed_step_index = index
-            if clock() - sequence_started > MAX_SEQUENCE_RUNTIME_SECONDS:
-                raise SequenceSafetyError(
-                    f"Sequence exceeded its {MAX_SEQUENCE_RUNTIME_SECONDS:.0f}-second runtime limit."
-                )
+            child_session_id = None
+            check_safety()
+            if index > 1:
+                _assert_sequence_focus(active_provider, title, target.process_id, target.handle)
 
-            if previous_process_id is not None:
-                if stop_probe.is_pressed():
-                    raise SequenceSafetyError("Emergency stop pressed between actions; sequence cancelled.")
-                _assert_sequence_focus(active_provider, title, previous_process_id)
+            child_session_id = f"action-{uuid4().hex[:12]}"
 
             store.log_event(
                 "sequence_step_started",
@@ -290,6 +309,7 @@ def run_action_sequence(
                 result="started",
                 details={
                     "sequence_id": sequence_id,
+                    "action_session_id": child_session_id,
                     "step_index": index,
                     "step_count": len(plan.steps),
                     "duration_seconds": step.duration_seconds,
@@ -304,19 +324,22 @@ def run_action_sequence(
                 duration_seconds=step.duration_seconds,
                 confirmed=True,
                 window_title=title,
-                provider=active_provider,  # type: ignore[arg-type]
-                controller=controller,
+                provider=active_provider,
+                controller=active_controller,
+                mapping=mapping,
+                expected_target=target,
+                activate=index == 1,
+                safety_check=check_safety,
+                diagnostic_session_id=child_session_id,
+                parent_sequence_id=sequence_id,
             )
-            if previous_process_id is not None and result.process_id != previous_process_id:
-                raise SequenceSafetyError("The target emulator process changed during the sequence.")
-            previous_process_id = result.process_id
             completed_results.append(result)
 
             store.log_event(
                 "sequence_step_completed",
                 state="SEQUENCE_RUNNING",
                 action=step.action,
-                result="completed",
+                result="completed" if result.after_screenshot is not None else "partial",
                 elapsed_seconds=clock() - sequence_started,
                 details={
                     "sequence_id": sequence_id,
@@ -331,24 +354,29 @@ def run_action_sequence(
                 },
             )
 
+            check_safety()
+            _assert_sequence_focus(active_provider, title, target.process_id, target.handle)
+            if result.after_screenshot is None:
+                raise SequenceSafetyError(
+                    "After screenshot missing; remaining actions were cancelled. Do not retry automatically."
+                )
+
             if step.delay_after_seconds > 0 and index < len(plan.steps):
                 _wait_between_actions(
                     step.delay_after_seconds,
                     provider=active_provider,
                     title=title,
-                    process_id=previous_process_id,
+                    process_id=target.process_id,
+                    window_handle=target.handle,
                     emergency_stop=stop_probe,
                     clock=clock,
                     sleeper=sleeper,
                     sequence_started=sequence_started,
                 )
 
+        check_safety()
         elapsed = clock() - sequence_started
-        status = (
-            "completed"
-            if all(result.after_screenshot is not None for result in completed_results)
-            else "partial"
-        )
+        status = "completed"
         store.log_event(
             "sequence_completed",
             state="SEQUENCE_COMPLETE",
@@ -374,7 +402,7 @@ def run_action_sequence(
             elapsed_seconds=elapsed,
             action_results=tuple(result.as_dict() for result in completed_results),
         )
-    except Exception as exc:
+    except (Exception, KeyboardInterrupt) as exc:
         store.log_event(
             "sequence_aborted",
             state="SEQUENCE_ABORTED",
@@ -384,6 +412,8 @@ def run_action_sequence(
             details={
                 "sequence_id": sequence_id,
                 "failed_step_index": failed_step_index,
+                "failed_action_session_id": child_session_id,
+                "completed_action_session_ids": [r.diagnostic_session_id for r in completed_results],
                 "steps_completed": len(completed_results),
                 "step_count": len(plan.steps),
                 "error_type": type(exc).__name__,
@@ -391,5 +421,11 @@ def run_action_sequence(
                 "remaining_steps_cancelled": True,
             },
         )
-        store.finish_session(final_state="SEQUENCE_ABORTED", status="failed")
+        store.finish_session(
+            final_state="SEQUENCE_ABORTED",
+            status=("interrupted" if isinstance(exc, KeyboardInterrupt) else
+                    "partial" if completed_results else "failed"),
+        )
         raise
+    finally:
+        active_controller.release_all()

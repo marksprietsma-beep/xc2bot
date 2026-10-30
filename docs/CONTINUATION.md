@@ -57,12 +57,7 @@
 
 ## Next steps
 
-1. Confirm Windows CI passes for Stage 2B.
-2. Have Mark run the updated test suite and configure the local keyboard mapping.
-3. Validate one 0.25-second movement action and its before/after screenshots.
-4. Only after manual input is reliable, consider a small sequence of individually bounded actions.
-5. Collect representative screenshots before implementing game-state recognition.
-6. Keep story progression under user control; stop on uncertain state.
+Stage 2C is implemented. Follow the current review and acceptance checklist below; do not begin Stage 3. Earlier Windows/game observations are historical evidence, not acceptance of the reviewed changes.
 
 
 ## Implemented in Stage 2C — bounded manual action sequences
@@ -105,3 +100,34 @@ Fix committed:
 - Added `tests/test_window_capture.py` with three regression tests: visible normal window unchanged, visible maximised window not unmaximised, and minimised window restored.
 
 The follow-up Windows CI run completed successfully: **48 tests passed, 0 failures** on Windows Server 2025 / Python 3.12, including all three new window-activation regression tests. Repeat the real-game sequence test after updating locally to confirm the window remains at its previous size.
+
+
+## Stage 2C safety review — 2026-10-30
+
+Reviewed branch `recovery/stage-1-foundation`, incorporating the concurrent window-activation fix through `fb44ced2376afcb1fab7d800606e813d6ae7ef31`. Preserved its minimized-only restoration and all three activation tests.
+
+Defects corrected:
+
+- **Untracked injected key:** key-down was outside the cleanup try/finally, and the key was tracked only after SendInput returned. A successful injection followed by Ctrl+C could leave the key held. Track before calling the sender inside the protected region.
+- **Forgotten failed release:** cleanup discarded keys even when key-up failed. Retain failed releases, permit bounded defensive key-up cleanup, and reject further key-downs while a release remains unresolved. No action retries were added.
+- **Changing inputs after validation:** every child reloaded the mapping. Pass the already validated mapping snapshot to every child.
+- **Target change and focus recovery race:** the process was checked only after a child could send input; checking only PID also permitted another window in the same process. Pin PID and HWND before the first child, validate that pair before input and while holding, and permit automatic activation only on the first step.
+- **Incomplete stop/deadline coverage:** use one stop probe and clock across the controller and sequence; check before initial activation, during holds, during delays and after the final capture. Keep all original numerical limits unchanged.
+- **Incomplete failure diagnostics:** Ctrl+C bypassed exception handlers, and failed children were not linked to their parent. Reserve child IDs in the parent's step-start event, record the parent in child events, log aborted child IDs, and finalize both sessions as interrupted when possible.
+- **Continuing without after evidence:** a failed/missing after screenshot now aborts remaining steps and records partial status rather than continuing.
+- **Ambiguous configuration:** reject duplicate JSON fields in plans/mappings, overflowing numeric durations/delays and explicit empty title overrides before window/input activity.
+
+Local verification: `.venv` Python **3.12.14**, declared dependency installation (`pip install -e .`) succeeded. `python -m xc2bot test`: **77 run, 75 passed, 2 skipped, 0 failures, 0 errors**. Skips are the existing Windows-only native INPUT-size and fake-SendInput layout tests. No Linux-specific tests or CI were added. Tests use fake input/capture providers and deterministic clocks, including checks that screenshots occur with keys released, actions/delays are ordered, JSONL/SQLite counts agree, and parent/child sessions have matching links and final statuses.
+
+A partial/aborted sequence may already have moved the character. `steps_completed` counts returned child results, not proof that no physical input occurred in the failed child. Inspect its `keyboard_action_*` events, `input_may_have_occurred`, and `keyboard_release_failed` before considering any further manual action. Do not automatically retry.
+
+### Required post-review Windows acceptance (Mark only)
+
+1. Keep PR #1 draft; update the local recovery branch, preserve `config/keyboard.json`, and run `py -3.12 -m venv .venv` only if a venv is absent. Install with `.\.venv\Scripts\python.exe -m pip install -e .` and run `.\.venv\Scripts\python.exe -m xc2bot test`. Expect **77 tests and no skips on Windows**. Windows CI success validates mocks/native structure layout, not gameplay.
+2. Verify mappings against the installed Ryujinx build and use an open, safe in-game area. Perform real input only when Mark explicitly elects to run acceptance. Confirm the initial activation preserves the existing maximized/normal size (minimized windows may be restored).
+3. Run the documented example sequence once. Expect four short movements, eight screenshots and four linked child sessions, with no remaining held direction. Inspect parent JSONL/SQLite events and child session statuses.
+4. Separately test Ctrl+Alt+F12, Ctrl+C, and switching focus during a hold/inter-step delay. Use a deliberately short, safe plan with a delay so there is time to interrupt. Expect no subsequent key-down, best-effort release, an aborted parent and interrupted/failed child where applicable. No automatic reactivation should follow focus loss. Record the exact step and key state observed.
+5. Inspect captures locally for unrelated desktop content. MSS captures visible desktop pixels, with a focus/capture race; exports exclude screenshots by default. The exporter selects the latest child session for its summary/JSONL, while its SQLite copy contains the related parent/child sessions; inspect those links in the local journal/database.
+6. Record Python/Windows/Ryujinx/game versions, tested commit, unit-test counts, window-size behavior, stop/focus-loss results and diagnostic IDs. Do not share game files, private screenshots or unredacted paths/secrets. Do not merge or begin Stage 3 until Mark accepts this reviewed version.
+
+Residual risks: Windows can reject key-up; process termination or repeated interrupts can prevent cleanup. Foreground checks cannot make desktop SendInput atomic, nor can they verify that a mapped key is safe in the current game state. Blocking capture/activation/storage calls can overrun the cooperative runtime guard. This remains a bounded manual test engine, not unattended combat/farming or story automation.

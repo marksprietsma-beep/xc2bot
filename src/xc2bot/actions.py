@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 
 from .config import Settings
@@ -123,6 +123,12 @@ def perform_mapped_action(
     window_title: str | None = None,
     provider: ActionWindowProvider | None = None,
     controller: KeyboardController | None = None,
+    mapping: KeyboardMapping | None = None,
+    expected_target: WindowInfo | None = None,
+    activate: bool = True,
+    safety_check: Callable[[], None] | None = None,
+    diagnostic_session_id: str | None = None,
+    parent_sequence_id: str | None = None,
 ) -> KeyboardActionResult:
     """Activate Ryujinx, then send one mapped key with strict safety checks.
 
@@ -134,26 +140,29 @@ def perform_mapped_action(
     """
     if not confirmed:
         raise KeyboardActionError("A manual keyboard action requires explicit operator confirmation.")
-    mapping: KeyboardMapping = load_keyboard_mapping(mapping_path)
+    mapping = mapping if mapping is not None else load_keyboard_mapping(mapping_path)
     key = resolve_action_key(mapping, action)
     duration = validate_hold_duration(duration_seconds)
-    title = (window_title or mapping.window_title_contains).strip()
+    title = (mapping.window_title_contains if window_title is None else window_title).strip()
     if not title:
         raise ValueError("window title match must not be empty")
 
     active_provider = provider or WindowsWindowProvider()
-    selected_target = _select_target_window(active_provider, title)
-    target = _activate_target_window(active_provider, selected_target)
     active_controller = controller or WindowsKeyboardController()
-    store = DiagnosticStore(settings.log_dir, settings)
+    store = DiagnosticStore(settings.log_dir, settings, session_id=diagnostic_session_id)
     before_path = _screenshot_path(Path(settings.log_dir), "before")
     after_path: Path | None = None
     action_started = False
 
+    def check_safety() -> None:
+        if safety_check is not None:
+            safety_check()
+
     def focus_check() -> bool:
+        check_safety()
         matches = [
             item for item in active_provider.find_windows(title)
-            if item.handle == target.handle
+            if item.handle == target.handle and item.process_id == target.process_id
         ]
         return (
             len(matches) == 1
@@ -163,6 +172,27 @@ def perform_mapped_action(
 
     try:
         store.log_event(
+            "action_session_linked", state="INPUT_READY", result="started",
+            details={"parent_sequence_id": parent_sequence_id},
+        )
+        check_safety()
+        if expected_target is None:
+            selected_target = _select_target_window(active_provider, title)
+        else:
+            matches = [item for item in active_provider.find_windows(title)
+                       if item.handle == expected_target.handle
+                       and item.process_id == expected_target.process_id]
+            if len(matches) != 1:
+                raise TargetWindowNotFound("The pinned emulator window disappeared; no input was sent.")
+            selected_target = matches[0]
+        if activate:
+            target = _activate_target_window(active_provider, selected_target)
+        else:
+            target = selected_target
+        if (target.handle != selected_target.handle or target.process_id != selected_target.process_id
+                or not focus_check()):
+            raise TargetWindowNotForeground("The pinned Ryujinx window is not foreground; no input was sent.")
+        store.log_event(
             "session_started",
             state="INPUT_READY",
             result="ok",
@@ -171,7 +201,8 @@ def perform_mapped_action(
                 "window_title": target.title,
                 "process_id": target.process_id,
                 "story_progression": False,
-                "window_activation": "automatic",
+                "window_activation": "automatic" if activate else "foreground_only",
+                "parent_sequence_id": parent_sequence_id,
             },
         )
 
@@ -209,6 +240,8 @@ def perform_mapped_action(
             },
         )
         active_controller.press(key, duration, focus_check=focus_check)
+        active_controller.release_all()
+        check_safety()
         store.log_event(
             "keyboard_action_completed",
             state="INPUT_COMPLETE",
@@ -224,7 +257,8 @@ def perform_mapped_action(
 
         after_matches = [
             item for item in active_provider.find_windows(title)
-            if item.handle == target.handle and item.is_foreground and not item.is_minimized
+            if item.handle == target.handle and item.process_id == target.process_id
+            and item.is_foreground and not item.is_minimized
         ]
         after_target = after_matches[0] if len(after_matches) == 1 else None
 
@@ -263,6 +297,7 @@ def perform_mapped_action(
                 details={"phase": "after", "reason": "target_window_not_foreground"},
             )
 
+        check_safety()
         store.finish_session(
             final_state="INPUT_COMPLETE",
             status="completed" if after_path is not None else "partial",
@@ -278,7 +313,7 @@ def perform_mapped_action(
             diagnostic_session_id=store.session_id,
             emergency_stop=EMERGENCY_STOP_LABEL,
         )
-    except Exception as exc:
+    except (Exception, KeyboardInterrupt) as exc:
         try:
             active_controller.release_all()
         except Exception as release_exc:
@@ -300,9 +335,13 @@ def perform_mapped_action(
                 "error_type": type(exc).__name__,
                 "error": str(exc),
                 "key_release_attempted": True,
+                "input_may_have_occurred": action_started,
             },
         )
-        store.finish_session(final_state="INPUT_ERROR", status="failed")
+        store.finish_session(
+            final_state="INPUT_ERROR",
+            status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+        )
         raise
     finally:
         active_controller.release_all()

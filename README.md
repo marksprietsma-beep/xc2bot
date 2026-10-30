@@ -41,13 +41,18 @@ Stage 2B is a **manual one-action test interface**, not an unattended bot. It do
 - Hard limits: 5 seconds total key-hold time, 2 seconds per inter-step delay, 10 seconds total delay, 15 seconds total planned time and 45 seconds maximum measured runtime.
 - Requires an explicit --confirm acknowledgement for every sequence.
 - Captures before/after screenshots for each action and records per-action child sessions.
-- Creates a parent sequence diagnostic session linking each action session and its screenshot filenames.
-- Checks the emergency-stop chord and emulator foreground focus between actions; a failure aborts all remaining steps.
+- Creates a parent sequence diagnostic session linking successful, failed and interrupted child actions and screenshot filenames.
+- Uses the same emergency-stop probe during holds and between actions, including before the first activation.
+- Pins the process ID and window handle for the entire sequence; activation is allowed only for the first action. Later focus loss aborts instead of stealing focus back.
+- Reads and validates the mapping once; editing its file mid-sequence cannot change the validated keys.
+- Missing after screenshots, focus loss, runtime expiry or logging errors cancel all remaining actions. Ctrl+C finalizes interrupted parent/child sessions when diagnostic storage is usable.
 - No loops, retries, simultaneous keys, combat decisions, target selection or story progression.
+
+The reviewed changes still require Mark's post-fix Windows acceptance before Stage 3. Only Mark should execute the following real-input acceptance command.
 
 Run the supplied short movement plan from PowerShell:
 
-    .\\.venv\\Scripts\\python.exe -m xc2bot sequence --mapping config\\keyboard.json --plan config\\sequence.example.json --confirm
+    .\.venv\Scripts\python.exe -m xc2bot sequence --mapping config\keyboard.json --plan config\sequence.example.json --confirm
 
 The example performs four short directional movements. Test it only in an open, safe area. The sequence is manually initiated and runs once; it is not an unattended farming loop.
 
@@ -94,7 +99,7 @@ The command:
 - Captures an after screenshot if Ryujinx remains foreground.
 - Records the action, duration, key, window and screenshot metadata in JSONL and SQLite.
 
-**Safety limits:** one key per command, no modifiers or key combinations, no repeats, maximum hold 1.00 second, foreground-window verification, and an explicit --confirm acknowledgement. Press **Ctrl+Alt+F12** during a hold to request an emergency stop; **Ctrl+C** also interrupts the command. The controller attempts to release any key it has pressed on every exit path.
+**Safety limits:** one key per command, no modifiers or key combinations, no repeats, maximum hold 1.00 second, foreground-window verification, and an explicit --confirm acknowledgement. Press **Ctrl+Alt+F12** during a hold to request an emergency stop; **Ctrl+C** also interrupts the command. The controller tracks a key before attempting key-down so an interrupt in SendInput still enters key-up cleanup. A failed key-up remains tracked for bounded defensive cleanup and blocks further key-downs. This is best-effort release, not an OS-level guarantee: denied SendInput, process termination or repeated interrupts can prevent cleanup. Stop using the tool if release fails; do not start another input command until the held-key state is resolved.
 
 The command activates the matching Ryujinx window before taking the before screenshot and sending input. If Windows refuses to activate it, the command fails closed and sends no key. If the emulator loses focus during the hold, the action stops and the key is released. Run PowerShell and Ryujinx at the same privilege level; Windows may reject SendInput if their elevation levels differ.
 
@@ -116,10 +121,18 @@ Generated logs, databases and screenshots are written under artifacts/logs by de
 
 Screenshots use visible desktop pixels inside the game's Windows client rectangle. The game window must be visible and unobscured; this is not off-screen capture. Keyboard input goes to the current foreground application, so the tool activates the matching Ryujinx window and verifies it immediately before and during a hold. This remains a best-effort desktop automation boundary: it is not a direct emulator-control API.
 
-Synchronous timeouts are detected only after a blocking action returns. Stage 2B's one-shot hold and Stage 2C's manually initiated sequence are bounded; unattended operation is not supported. There is no game-state recognition, combat strategy, target selection, or automatic recovery yet.
+Safety checks run throughout cooperative holds (20 ms polling) and inter-step waits (50 ms polling), and around action setup/screenshots. Synchronous activation, capture, diagnostic I/O and OS calls cannot be forcibly interrupted by the 45-second runtime guard; expiry cancels further actions when control returns. Desktop focus can change between a check and SendInput/screenshot capture. A valid plan or semantic action name cannot prove that an in-game action is safe; Mark must verify bindings and choose a safe location. Stage 2B's one-shot hold and Stage 2C's manually initiated sequence are bounded; unattended operation is not supported. There is no game-state recognition, combat strategy, target selection, or automatic recovery yet.
 
 See docs/CONTINUATION.md for the continuation checkpoint.
 
 ## Public repository notice
 
 Do not commit game files, dumps, emulator firmware, encryption keys, save files, credentials, secrets, personal data or unredacted logs. Use only game and emulator files obtained and used lawfully by the user.
+
+## Stage 2C review validation
+
+Python 3.12.14 cloud validation ran 77 tests: **75 passed, 2 Windows-only tests skipped, 0 failures/errors**. The skipped tests check the native INPUT layout and SendInput structure with a fake API. This is not a Windows or emulator acceptance result. The latest recovery branch also includes the separately committed window-size-preserving activation fix and its three regressions.
+
+New regression coverage includes uncertain/interrupted key-down, failed key-up tracking, blocked subsequent input, mapping-file changes, pinned target identity, first-step stop, mid-hold and inter-step stops, focus loss, deadline expiry after final capture, strict JSON validation and limits, capture/logging failures, ordered releases/captures/delays, CLI validation and interrupted parent/child persistence. All input senders and captures in these tests are fake. No real emulator input was executed during review.
+
+See `docs/CONTINUATION.md` for the audit findings and the outstanding Windows acceptance checklist. Do not begin Stage 3 or merge PR #1 before Mark accepts the reviewed version.

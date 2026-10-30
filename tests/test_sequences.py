@@ -238,6 +238,9 @@ class ActionSequenceTests(unittest.TestCase):
             ])
             provider = FakeWindowProvider()
             controller = FakeController()
+            class StopAfterFirstAction:
+                def is_pressed(self):
+                    return len(provider.captures) >= 2
             with self.assertRaises(SequenceSafetyError):
                 run_action_sequence(
                     Settings(log_dir=temp),
@@ -246,7 +249,7 @@ class ActionSequenceTests(unittest.TestCase):
                     confirmed=True,
                     provider=provider,
                     controller=controller,
-                    emergency_stop=FakeEmergencyStop([True]),
+                    emergency_stop=StopAfterFirstAction(),
                 )
             self.assertEqual(controller.actions, [("W", 0.25)])
             self.assertEqual(len(provider.captures), 2)
