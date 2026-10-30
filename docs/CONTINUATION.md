@@ -91,3 +91,17 @@
 ## Stage 2C safety boundary
 
 Stage 2C is a manually initiated, one-pass action sequence only. It does not observe game state, make decisions, select enemies, fight, farm, loop, retry, or progress the story. Stage 3 must add read-only game-state recognition and an operator-visible confidence/unknown state before any combat behaviour is considered.
+
+
+## Follow-up after first real-game Stage 2C acceptance test
+
+Mark ran the four-step example in Ryujinx and confirmed that Rex visibly moved. All eight before/after screenshots were captured, demonstrating that the real-game input path works. The user reported that Ryujinx's window became smaller during automatic activation.
+
+Root cause identified in `WindowsWindowProvider.activate_window`: it called Win32 `ShowWindow(SW_RESTORE)` even when the target was visible but merely not foreground. `SW_RESTORE` can unmaximise a visible maximised window and return it to its previous windowed dimensions.
+
+Fix committed:
+- Call `ShowWindow(SW_RESTORE)` only when `IsIconic(hwnd)` reports that the window is actually minimised.
+- For visible normal or maximised windows, preserve the current size/state and call `SetForegroundWindow` only.
+- Added `tests/test_window_capture.py` with three regression tests: visible normal window unchanged, visible maximised window not unmaximised, and minimised window restored.
+
+The latest confirmed CI result before this follow-up was 45 passing Windows tests. The three new regression tests have been added but their CI result is not yet available. Re-run the full Windows suite and repeat the real-game sequence test to confirm the fix.
