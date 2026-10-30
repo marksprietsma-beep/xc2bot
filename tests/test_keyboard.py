@@ -164,6 +164,14 @@ class KeyboardControllerTests(unittest.TestCase):
         self.assertEqual(sender.events, [("W", True), ("W", False)])
 
 
+    @unittest.skipUnless(os.name == "nt", "Windows INPUT layout test")
+    def test_windows_input_structure_matches_win32_size(self):
+        # sizeof(INPUT) is 40 bytes on 64-bit Windows and 28 bytes on 32-bit.
+        expected_size = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
+        self.assertEqual(ctypes.sizeof(_INPUT), expected_size)
+        self.assertEqual(_INPUT.union.offset, 8 if expected_size == 40 else 4)
+
+
     @unittest.skipUnless(os.name == "nt", "Windows SendInput structure test")
     def test_windows_sender_builds_key_event_without_sending_to_desktop(self):
         sender = WindowsSendInputSender()
