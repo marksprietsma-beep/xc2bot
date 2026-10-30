@@ -95,6 +95,8 @@ def _activate_target_window(
     provider: ActionWindowProvider,
     selected: WindowInfo,
 ) -> WindowInfo:
+    if selected.is_foreground and not selected.is_minimized:
+        return selected
     try:
         active = provider.activate_window(selected)
     except WindowNotForegroundError as exc:
