@@ -151,7 +151,11 @@ class WindowsWindowProvider:
     def activate_window(self, window: WindowInfo) -> WindowInfo:
         user32 = self._user32()
         hwnd = wintypes.HWND(window.handle)
-        user32.ShowWindow(hwnd, self._SW_RESTORE)
+        # SW_RESTORE also unmaximises a window that is already visible.
+        # Only use it for a genuinely minimised window; otherwise preserve
+        # the user's current window size and maximised state.
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, self._SW_RESTORE)
         user32.SetForegroundWindow(hwnd)
         time.sleep(self._FOCUS_SETTLE_SECONDS)
         updated = self._read_window(hwnd, user32)
