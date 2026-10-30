@@ -8,6 +8,7 @@ import os
 import ctypes
 
 from xc2bot.actions import (
+    KeyboardActionError,
     TargetWindowNotForeground,
     perform_mapped_action,
 )
@@ -223,7 +224,7 @@ class KeyboardActionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             provider = FakeWindowProvider()
             controller = FakeController()
-            with self.assertRaises(ValueError):
+            with self.assertRaises(KeyboardActionError):
                 perform_mapped_action(
                     Settings(log_dir=temp),
                     mapping_path=self._mapping(temp),
