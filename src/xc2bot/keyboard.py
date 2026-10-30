@@ -169,27 +169,30 @@ class WindowsEmergencyStopProbe:
         )
 
 
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_size_t),
+    ]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [("ki", _KEYBDINPUT)]
+
+
+class _INPUT(ctypes.Structure):
+    _anonymous_ = ("union",)
+    _fields_ = [("type", wintypes.DWORD), ("union", _INPUTUNION)]
+
+
 class WindowsSendInputSender:
     """Injects one virtual-key down/up event through the Windows SendInput API."""
 
     INPUT_KEYBOARD = 1
     KEYEVENTF_KEYUP = 0x0002
-
-    class _KEYBDINPUT(ctypes.Structure):
-        _fields_ = [
-            ("wVk", wintypes.WORD),
-            ("wScan", wintypes.WORD),
-            ("dwFlags", wintypes.DWORD),
-            ("time", wintypes.DWORD),
-            ("dwExtraInfo", ctypes.c_size_t),
-        ]
-
-    class _INPUTUNION(ctypes.Union):
-        _fields_ = [("ki", _KEYBDINPUT)]
-
-    class _INPUT(ctypes.Structure):
-        _anonymous_ = ("union",)
-        _fields_ = [("type", wintypes.DWORD), ("union", _INPUTUNION)]
 
     def __init__(self) -> None:
         if os.name != "nt":
@@ -197,7 +200,7 @@ class WindowsSendInputSender:
         self._user32 = ctypes.WinDLL("user32", use_last_error=True)
         self._user32.SendInput.argtypes = [
             wintypes.UINT,
-            ctypes.POINTER(self._INPUT),
+            ctypes.POINTER(_INPUT),
             ctypes.c_int,
         ]
         self._user32.SendInput.restype = wintypes.UINT
@@ -205,15 +208,15 @@ class WindowsSendInputSender:
     def send_key(self, key: str, *, key_down: bool) -> None:
         name = normalise_key_name(key)
         flags = 0 if key_down else self.KEYEVENTF_KEYUP
-        keyboard_input = self._KEYBDINPUT(
+        keyboard_input = _KEYBDINPUT(
             wVk=_KEY_CODES[name],
             wScan=0,
             dwFlags=flags,
             time=0,
             dwExtraInfo=0,
         )
-        input_event = self._INPUT(type=self.INPUT_KEYBOARD, ki=keyboard_input)
-        sent = self._user32.SendInput(1, ctypes.byref(input_event), ctypes.sizeof(self._INPUT))
+        input_event = _INPUT(type=self.INPUT_KEYBOARD, ki=keyboard_input)
+        sent = self._user32.SendInput(1, ctypes.byref(input_event), ctypes.sizeof(_INPUT))
         if sent != 1:
             error = ctypes.get_last_error()
             explanation = (
