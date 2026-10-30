@@ -104,4 +104,4 @@ Fix committed:
 - For visible normal or maximised windows, preserve the current size/state and call `SetForegroundWindow` only.
 - Added `tests/test_window_capture.py` with three regression tests: visible normal window unchanged, visible maximised window not unmaximised, and minimised window restored.
 
-The latest confirmed CI result before this follow-up was 45 passing Windows tests. The three new regression tests have been added but their CI result is not yet available. Re-run the full Windows suite and repeat the real-game sequence test to confirm the fix.
+The follow-up Windows CI run completed successfully: **48 tests passed, 0 failures** on Windows Server 2025 / Python 3.12, including all three new window-activation regression tests. Repeat the real-game sequence test after updating locally to confirm the window remains at its previous size.
