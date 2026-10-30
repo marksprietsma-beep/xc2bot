@@ -16,6 +16,7 @@ from .diagnostics import DiagnosticStore, environment_info
 from .keyboard import EMERGENCY_STOP_LABEL, MAX_HOLD_SECONDS, load_keyboard_mapping
 from .observer import DEFAULT_GAME_TITLE, find_game_windows, observe_once
 from .simulator import run_simulation
+from .sequences import run_action_sequence
 
 
 def _settings(args: argparse.Namespace) -> Settings:
@@ -80,6 +81,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         required=True,
         help="required acknowledgement: send one key to the foreground emulator window",
+    )
+
+    sequence = sub.add_parser(
+        "sequence",
+        help="run a short, manually confirmed sequence of bounded single-key actions",
+    )
+    sequence.add_argument("--mapping", required=True, help="path to a keyboard mapping JSON file")
+    sequence.add_argument("--plan", required=True, help="path to a sequence plan JSON file")
+    sequence.add_argument("--window-title", help="override the title substring in the mapping file")
+    sequence.add_argument("--log-dir", help="override diagnostic log directory")
+    sequence.add_argument(
+        "--confirm",
+        action="store_true",
+        required=True,
+        help="required acknowledgement: execute each action in the supplied sequence plan",
     )
 
     return parser
@@ -147,6 +163,18 @@ def main(argv: list[str] | None = None) -> int:
                 mapping_path=args.mapping,
                 action=args.action,
                 duration_seconds=args.duration,
+                confirmed=args.confirm,
+                window_title=args.window_title,
+            )
+            print(json.dumps(result.as_dict(), indent=2))
+            return 0
+
+        if args.command == "sequence":
+            settings = _settings(args)
+            result = run_action_sequence(
+                settings,
+                mapping_path=args.mapping,
+                plan_path=args.plan,
                 confirmed=args.confirm,
                 window_title=args.window_title,
             )
