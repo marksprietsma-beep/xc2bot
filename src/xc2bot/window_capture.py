@@ -148,14 +148,18 @@ class WindowsWindowProvider:
             raise WindowCaptureError(f"Windows could not enumerate desktop windows (error {error}).")
         return matches
 
+    def _restore_if_minimised(self, user32, hwnd) -> None:
+        """Restore only minimised windows; never unmaximise a visible window."""
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, self._SW_RESTORE)
+
     def activate_window(self, window: WindowInfo) -> WindowInfo:
         user32 = self._user32()
         hwnd = wintypes.HWND(window.handle)
         # SW_RESTORE also unmaximises a window that is already visible.
         # Only use it for a genuinely minimised window; otherwise preserve
         # the user's current window size and maximised state.
-        if user32.IsIconic(hwnd):
-            user32.ShowWindow(hwnd, self._SW_RESTORE)
+        self._restore_if_minimised(user32, hwnd)
         user32.SetForegroundWindow(hwnd)
         time.sleep(self._FOCUS_SETTLE_SECONDS)
         updated = self._read_window(hwnd, user32)
