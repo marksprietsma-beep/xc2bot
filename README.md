@@ -131,8 +131,23 @@ Do not commit game files, dumps, emulator firmware, encryption keys, save files,
 
 ## Stage 2C review validation
 
-Python 3.12.14 cloud validation ran 77 tests: **75 passed, 2 Windows-only tests skipped, 0 failures/errors**. The skipped tests check the native INPUT layout and SendInput structure with a fake API. This is not a Windows or emulator acceptance result. The latest recovery branch also includes the separately committed window-size-preserving activation fix and its three regressions.
+Python 3.12.14 cloud validation, including foreground telemetry regressions, ran 90 tests: **88 passed, 2 Windows-only tests skipped, 0 failures/errors**. The skipped tests check the native INPUT layout and SendInput structure with a fake API. This is not a Windows or emulator acceptance result. The latest recovery branch also includes the separately committed window-size-preserving activation fix and its three regressions.
 
 New regression coverage includes uncertain/interrupted key-down, failed key-up tracking, blocked subsequent input, mapping-file changes, pinned target identity, first-step stop, mid-hold and inter-step stops, focus loss, deadline expiry after final capture, strict JSON validation and limits, capture/logging failures, ordered releases/captures/delays, CLI validation and interrupted parent/child persistence. All input senders and captures in these tests are fake. No real emulator input was executed during review.
 
 See `docs/CONTINUATION.md` for the audit findings and the outstanding Windows acceptance checklist. Do not begin Stage 3 or merge PR #1 before Mark accepts the reviewed version.
+
+## Foreground-focus diagnostics
+
+Manual input and sequence child sessions now write `foreground_checkpoint` events to JSONL and SQLite:
+
+- `before_screenshot` and `after_screenshot`, with `capture_phase` equal to `before` or `after`, bracket each successful screenshot capture.
+- `before_keyboard_input` records the foreground immediately before the existing pre-input focus guard. The controller still makes its own fresh checks before and during the hold.
+- `after_action` records the foreground after the hold and release have returned, before after-screenshot capture.
+- `action_failed` adds an observation after defensive release is attempted on an action error or interrupt, when a target was selected.
+
+Each event includes the sampled foreground `handle` (HWND), `process_id` and `title`, the pinned `target` identity with the same fields, an observation timestamp and `parent_sequence_id`. Filter by the child session ID from the parent's `sequence_step_started` event to inspect a particular step. Titles use the existing path/secret redaction in both stores; review logs before sharing.
+
+The reader queries actual foreground identity, even for a non-Ryujinx or zero-client-area window. It calls only `GetForegroundWindow`, `GetWindowTextLengthW`, `GetWindowTextW` and `GetWindowThreadProcessId`; it never activates/restores a window, changes DPI settings or prints checkpoint messages to the console. A null HWND is recorded as handle 0; a missing PID is null, and an empty title may be legitimate. `changed_during_read` flags a handle change while metadata was sampled. A reader exception produces an explicit `unavailable` observation, and the original safety checks still determine whether input is allowed. A persistence failure retains stop-on-lost-diagnostics behavior.
+
+A successful screenshot is not proof that Ryujinx remained foreground after capture. These read-only observations cannot identify which application took focus in an older journal that did not record it, and they do not make focus checking atomic. No key durations, delay settings, polling intervals or activation rules changed. The additional diagnostic I/O adds overhead around actions, without adding telemetry to the key-hold polling loop. Focus loss continues to cancel the sequence; Ryujinx is not reactivated mid-sequence.

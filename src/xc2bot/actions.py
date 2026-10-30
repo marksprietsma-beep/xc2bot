@@ -9,7 +9,7 @@ from typing import Callable, Protocol
 from uuid import uuid4
 
 from .config import Settings
-from .diagnostics import DiagnosticStore
+from .diagnostics import DiagnosticStore, utc_now
 from .keyboard import (
     EMERGENCY_STOP_LABEL,
     KeyboardMapping,
@@ -18,7 +18,9 @@ from .keyboard import (
     resolve_action_key,
     validate_hold_duration,
 )
-from .window_capture import WindowInfo, WindowNotForegroundError, WindowsWindowProvider
+from .window_capture import (
+    ForegroundWindowInfo, WindowInfo, WindowNotForegroundError, WindowsWindowProvider,
+)
 
 
 class KeyboardActionError(RuntimeError):
@@ -38,6 +40,7 @@ class AmbiguousTargetWindow(KeyboardActionError):
 
 
 class ActionWindowProvider(Protocol):
+    def get_foreground_window(self) -> ForegroundWindowInfo: ...
     def find_windows(self, title_contains: str) -> list[WindowInfo]: ...
     def activate_window(self, window: WindowInfo) -> WindowInfo: ...
     def capture_window(self, window: WindowInfo, output_path: str | Path) -> tuple[int, int]: ...
@@ -153,6 +156,7 @@ def perform_mapped_action(
     before_path = _screenshot_path(Path(settings.log_dir), "before")
     after_path: Path | None = None
     action_started = False
+    target: WindowInfo | None = None
 
     def check_safety() -> None:
         if safety_check is not None:
@@ -168,6 +172,41 @@ def perform_mapped_action(
             len(matches) == 1
             and matches[0].is_foreground
             and not matches[0].is_minimized
+        )
+
+    def log_foreground(checkpoint: str, *, capture_phase: str | None = None) -> None:
+        # Identity telemetry only: never activate/restore, print to the console,
+        # or use its result to override the existing foreground safety checks.
+        assert target is not None  # Checkpoints begin only after target selection.
+        details: dict[str, object] = {
+            "checkpoint": checkpoint,
+            "capture_phase": capture_phase,
+            "observed_at": utc_now(),
+            "parent_sequence_id": parent_sequence_id,
+            "target": {"handle": target.handle, "process_id": target.process_id,
+                       "title": target.title},
+        }
+        try:
+            foreground = active_provider.get_foreground_window()
+            details["foreground"] = asdict(foreground)
+            observed = "observed"
+        except Exception as exc:
+            # An unavailable observation is not proof of target focus. The
+            # original fail-closed checks still run; persistence failures below
+            # retain the existing stop-on-lost-diagnostics behaviour.
+            details["foreground"] = None
+            details["observation_error_type"] = type(exc).__name__
+            observed = "unavailable"
+        if checkpoint == "action_failed":
+            state = "INPUT_ERROR"
+        elif checkpoint == "after_action" or capture_phase == "after":
+            state = "INPUT_COMPLETE"
+        else:
+            state = "INPUT_READY"
+        store.log_event(
+            "foreground_checkpoint",
+            state=state,
+            action=action.strip().upper(), result=observed, details=details,
         )
 
     try:
@@ -206,7 +245,9 @@ def perform_mapped_action(
             },
         )
 
+        log_foreground("before_screenshot", capture_phase="before")
         before_width, before_height = active_provider.capture_window(target, before_path)
+        log_foreground("after_screenshot", capture_phase="before")
         store.log_event(
             "screenshot_captured",
             state="INPUT_READY",
@@ -221,6 +262,7 @@ def perform_mapped_action(
             },
         )
 
+        log_foreground("before_keyboard_input")
         if not focus_check():
             raise TargetWindowNotForeground("Ryujinx lost foreground focus before input; no key was sent.")
 
@@ -241,6 +283,7 @@ def perform_mapped_action(
         )
         active_controller.press(key, duration, focus_check=focus_check)
         active_controller.release_all()
+        log_foreground("after_action")
         check_safety()
         store.log_event(
             "keyboard_action_completed",
@@ -265,7 +308,9 @@ def perform_mapped_action(
         if after_target is not None:
             after_path = _screenshot_path(Path(settings.log_dir), "after")
             try:
+                log_foreground("before_screenshot", capture_phase="after")
                 after_width, after_height = active_provider.capture_window(after_target, after_path)
+                log_foreground("after_screenshot", capture_phase="after")
                 store.log_event(
                     "screenshot_captured",
                     state="INPUT_COMPLETE",
@@ -324,6 +369,8 @@ def perform_mapped_action(
                 result="failed",
                 details={"error_type": type(release_exc).__name__, "error": str(release_exc)},
             )
+        if target is not None:
+            log_foreground("action_failed")
         store.log_event(
             "keyboard_action_failed" if action_started else "keyboard_action_rejected",
             state="INPUT_ERROR",

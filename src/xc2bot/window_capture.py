@@ -39,6 +39,16 @@ class WindowInfo:
     is_minimized: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ForegroundWindowInfo:
+    """Read-only identity snapshot, including non-target and zero-client windows."""
+
+    handle: int
+    process_id: int | None
+    title: str | None
+    changed_during_read: bool = False
+
+
 class WindowsWindowProvider:
     """Find a titled top-level window and capture its visible client area.
 
@@ -55,6 +65,48 @@ class WindowsWindowProvider:
         if isinstance(handle, int):
             return handle
         return int(ctypes.cast(handle, ctypes.c_void_p).value or 0)
+
+    @staticmethod
+    def _foreground_user32():
+        # Do not use _user32 here: diagnostics need only identity reads, with
+        # no DPI initialization, geometry, activation or restoration calls.
+        if os.name != "nt":
+            raise UnsupportedPlatformError("Foreground diagnostics currently require Windows.")
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetForegroundWindow.argtypes = []
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        user32.GetWindowTextLengthW.restype = ctypes.c_int
+        user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.GetWindowTextW.restype = ctypes.c_int
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        return user32
+
+    def get_foreground_window(self) -> ForegroundWindowInfo:
+        """Observe the actual foreground HWND without filtering titles or changing focus.
+
+        A null HWND and unavailable PID are explicit; an empty title is valid.
+        A second handle read marks a focus change during the metadata query.
+        Neither this snapshot nor that marker replaces the input safety checks.
+        """
+        user32 = self._foreground_user32()
+        hwnd = user32.GetForegroundWindow()
+        handle = self._handle_value(hwnd)
+        if not handle:
+            return ForegroundWindowInfo(0, None, None)
+        length = user32.GetWindowTextLengthW(hwnd)
+        title = ctypes.create_unicode_buffer(max(length + 1, 2))
+        user32.GetWindowTextW(hwnd, title, len(title))
+        process_id = wintypes.DWORD()
+        thread_id = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
+        latest = self._handle_value(user32.GetForegroundWindow())
+        return ForegroundWindowInfo(
+            handle=handle,
+            process_id=int(process_id.value) if thread_id and process_id.value else None,
+            title=title.value,
+            changed_during_read=latest != handle,
+        )
 
     @staticmethod
     def _user32():

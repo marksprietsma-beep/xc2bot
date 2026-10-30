@@ -14,7 +14,7 @@ from xc2bot.sequences import (
     load_action_sequence,
     run_action_sequence,
 )
-from xc2bot.window_capture import WindowInfo
+from xc2bot.window_capture import ForegroundWindowInfo, WindowInfo
 
 
 class FakeWindowProvider:
@@ -32,6 +32,11 @@ class FakeWindowProvider:
         )
         self.captures: list[Path] = []
         self.lose_focus_after_capture = lose_focus_after_capture
+
+    def get_foreground_window(self) -> ForegroundWindowInfo:
+        if self.window.is_foreground:
+            return ForegroundWindowInfo(self.window.handle, self.window.process_id, self.window.title)
+        return ForegroundWindowInfo(999, 888, "Other window")
 
     def find_windows(self, title_contains: str) -> list[WindowInfo]:
         if title_contains.casefold() not in self.window.title.casefold():

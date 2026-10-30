@@ -24,7 +24,7 @@ from xc2bot.keyboard import (
     resolve_action_key,
     validate_hold_duration,
 )
-from xc2bot.window_capture import WindowInfo, WindowNotForegroundError
+from xc2bot.window_capture import ForegroundWindowInfo, WindowInfo, WindowNotForegroundError
 
 
 class FakeSender:
@@ -62,6 +62,11 @@ class FakeWindowProvider:
         )
         self.captures: list[Path] = []
         self.activated: list[int] = []
+
+    def get_foreground_window(self) -> ForegroundWindowInfo:
+        if self.window.is_foreground:
+            return ForegroundWindowInfo(self.window.handle, self.window.process_id, self.window.title)
+        return ForegroundWindowInfo(999, 888, "Other window")
 
     def find_windows(self, title_contains: str) -> list[WindowInfo]:
         if title_contains.casefold() in self.window.title.casefold():
