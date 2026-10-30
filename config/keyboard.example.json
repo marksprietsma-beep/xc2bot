@@ -5,7 +5,25 @@
     "MOVE_BACK": "S",
     "MOVE_LEFT": "A",
     "MOVE_RIGHT": "D",
-    "CONFIRM": "ENTER",
-    "CANCEL": "ESC"
+    "LEFT_STICK_CLICK": "F",
+    "RIGHT_STICK_UP": "I",
+    "RIGHT_STICK_DOWN": "K",
+    "RIGHT_STICK_LEFT": "J",
+    "RIGHT_STICK_RIGHT": "L",
+    "RIGHT_STICK_CLICK": "H",
+    "BUTTON_A": "Z",
+    "BUTTON_B": "X",
+    "BUTTON_X": "C",
+    "BUTTON_Y": "V",
+    "LEFT_SHOULDER": "E",
+    "RIGHT_SHOULDER": "U",
+    "LEFT_TRIGGER": "Q",
+    "RIGHT_TRIGGER": "O",
+    "PLUS": "PLUS",
+    "MINUS": "MINUS",
+    "DPAD_UP": "UP",
+    "DPAD_DOWN": "DOWN",
+    "DPAD_LEFT": "LEFT",
+    "DPAD_RIGHT": "RIGHT"
   }
 }
