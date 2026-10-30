@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     input_action = sub.add_parser(
         "input",
-        help="send one manually confirmed key action to the already-foreground Ryujinx window",
+        help="send one manually confirmed, bounded key action to the Ryujinx game window",
     )
     input_action.add_argument("--mapping", required=True, help="path to a keyboard mapping JSON file")
     input_action.add_argument("--action", required=True, help="semantic action name from the mapping file")
