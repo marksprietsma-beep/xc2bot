@@ -57,7 +57,7 @@ Copy the example file and edit the keys to match the keyboard bindings currently
     Copy-Item config\keyboard.example.json config\keyboard.json
     notepad config\keyboard.json
 
-config/keyboard.json is intentionally git-ignored so local input choices are not committed. The example uses WASD, Enter and Escape as illustrative values only; check Ryujinx's Input settings rather than assuming these match your setup.
+config/keyboard.json is intentionally git-ignored so local input choices are not committed. The example mirrors the Joy-Con Pair keyboard bindings currently configured on Mark's Ryujinx setup, including WASD movement, IJKL right-stick movement, face buttons, shoulders, triggers and D-pad. PLUS and MINUS are supported as named virtual keys. Check Ryujinx's Input settings before using the example on another machine.
 
 Show the loaded mapping:
 
