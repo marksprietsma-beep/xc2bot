@@ -105,6 +105,7 @@ def perform_mapped_action(
     mapping_path: str | Path,
     action: str,
     duration_seconds: float,
+    confirmed: bool = False,
     window_title: str | None = None,
     provider: ActionWindowProvider | None = None,
     controller: KeyboardController | None = None,
@@ -115,6 +116,8 @@ def perform_mapped_action(
     every hold at one second. A global Ctrl+Alt+F12 emergency chord is polled
     while the key is held. Screenshots are local and excluded from ZIP exports.
     """
+    if not confirmed:
+        raise KeyboardActionError("A manual keyboard action requires explicit operator confirmation.")
     mapping: KeyboardMapping = load_keyboard_mapping(mapping_path)
     key = resolve_action_key(mapping, action)
     duration = validate_hold_duration(duration_seconds)
