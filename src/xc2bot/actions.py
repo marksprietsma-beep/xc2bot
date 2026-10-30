@@ -18,7 +18,7 @@ from .keyboard import (
     resolve_action_key,
     validate_hold_duration,
 )
-from .window_capture import WindowInfo, WindowsWindowProvider
+from .window_capture import WindowInfo, WindowNotForegroundError, WindowsWindowProvider
 
 
 class KeyboardActionError(RuntimeError):
@@ -39,6 +39,7 @@ class AmbiguousTargetWindow(KeyboardActionError):
 
 class ActionWindowProvider(Protocol):
     def find_windows(self, title_contains: str) -> list[WindowInfo]: ...
+    def activate_window(self, window: WindowInfo) -> WindowInfo: ...
     def capture_window(self, window: WindowInfo, output_path: str | Path) -> tuple[int, int]: ...
 
 
@@ -69,7 +70,7 @@ class KeyboardActionResult:
         return asdict(self)
 
 
-def _foreground_target(
+def _select_target_window(
     provider: ActionWindowProvider,
     title_contains: str,
 ) -> WindowInfo:
@@ -78,20 +79,31 @@ def _foreground_target(
         raise TargetWindowNotFound(
             f"No visible window title contains {title_contains!r}. Start XC2 in Ryujinx and retry."
         )
-    foreground = [
-        item for item in candidates
-        if item.is_foreground and not item.is_minimized
-    ]
-    if len(foreground) > 1:
-        raise AmbiguousTargetWindow(
-            "More than one matching emulator window is foreground. Close duplicates and retry."
-        )
-    if not foreground:
+    if len(candidates) == 1:
+        return candidates[0]
+    foreground = [item for item in candidates if item.is_foreground and not item.is_minimized]
+    if len(foreground) == 1:
+        return foreground[0]
+    choices = "; ".join(f"PID {item.process_id}: {item.title}" for item in candidates)
+    raise AmbiguousTargetWindow(
+        "More than one Ryujinx window matches the configured title and none is uniquely active. "
+        f"Use a more specific window_title_contains value. Matches: {choices}"
+    )
+
+
+def _activate_target_window(
+    provider: ActionWindowProvider,
+    selected: WindowInfo,
+) -> WindowInfo:
+    try:
+        active = provider.activate_window(selected)
+    except WindowNotForegroundError as exc:
+        raise TargetWindowNotForeground(str(exc)) from exc
+    if active.is_minimized or not active.is_foreground:
         raise TargetWindowNotForeground(
-            "Ryujinx is not the active window. Click the XC2 game window, then retry. "
-            "The input command will not steal focus or restore a minimised window."
+            "Windows did not make the Ryujinx game window active. No keyboard input was sent."
         )
-    return foreground[0]
+    return active
 
 
 def _screenshot_path(root: Path, phase: str) -> Path:
@@ -110,11 +122,13 @@ def perform_mapped_action(
     provider: ActionWindowProvider | None = None,
     controller: KeyboardController | None = None,
 ) -> KeyboardActionResult:
-    """Send one mapped key only while the selected Ryujinx window is foreground.
+    """Activate Ryujinx, then send one mapped key with strict safety checks.
 
-    This command never activates the emulator, never repeats actions, and caps
-    every hold at one second. A global Ctrl+Alt+F12 emergency chord is polled
-    while the key is held. Screenshots are local and excluded from ZIP exports.
+    The command remembers that PowerShell launched it, activates the uniquely
+    selected emulator window, and verifies focus before and during the key hold.
+    It never repeats actions and caps every hold at one second. A global
+    Ctrl+Alt+F12 emergency chord is polled while the key is held. Screenshots
+    are local and excluded from ZIP exports.
     """
     if not confirmed:
         raise KeyboardActionError("A manual keyboard action requires explicit operator confirmation.")
@@ -126,7 +140,8 @@ def perform_mapped_action(
         raise ValueError("window title match must not be empty")
 
     active_provider = provider or WindowsWindowProvider()
-    target = _foreground_target(active_provider, title)
+    selected_target = _select_target_window(active_provider, title)
+    target = _activate_target_window(active_provider, selected_target)
     active_controller = controller or WindowsKeyboardController()
     store = DiagnosticStore(settings.log_dir, settings)
     before_path = _screenshot_path(Path(settings.log_dir), "before")
@@ -154,6 +169,7 @@ def perform_mapped_action(
                 "window_title": target.title,
                 "process_id": target.process_id,
                 "story_progression": False,
+                "window_activation": "automatic",
             },
         )
 
@@ -204,13 +220,11 @@ def perform_mapped_action(
             },
         )
 
-        after_target = None
-        try:
-            after_target = _foreground_target(active_provider, title)
-            if after_target.handle != target.handle:
-                after_target = None
-        except KeyboardActionError:
-            after_target = None
+        after_matches = [
+            item for item in active_provider.find_windows(title)
+            if item.handle == target.handle and item.is_foreground and not item.is_minimized
+        ]
+        after_target = after_matches[0] if len(after_matches) == 1 else None
 
         if after_target is not None:
             after_path = _screenshot_path(Path(settings.log_dir), "after")
