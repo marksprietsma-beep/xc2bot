@@ -230,7 +230,7 @@ class SequenceSafetyRegressions(unittest.TestCase):
         with self.assertRaises(SequenceSafetyError):
             self.run_plan()
         self.assertEqual(self.controller.actions, [('W', 0.1)])
-        with sqlite3.connect(self.root / 'sessions.sqlite3') as db:
+        with contextlib.closing(sqlite3.connect(self.root / 'sessions.sqlite3')) as db:
             rows = db.execute('select status from sessions').fetchall()
         self.assertEqual(rows, [('partial',), ('partial',)])
 
@@ -286,7 +286,7 @@ class SequenceSafetyRegressions(unittest.TestCase):
         linked = next(e for e in events if e['event_type'] == 'action_session_linked')
         self.assertEqual(start['details']['action_session_id'], linked['session_id'])
         self.assertEqual(linked['details']['parent_sequence_id'], start['session_id'])
-        with sqlite3.connect(self.root / 'sessions.sqlite3') as db:
+        with contextlib.closing(sqlite3.connect(self.root / 'sessions.sqlite3')) as db:
             rows = db.execute('select ended_at, status from sessions').fetchall()
             count = db.execute('select count(*) from events').fetchone()[0]
         self.assertTrue(all(ended and status == 'interrupted' for ended, status in rows))
@@ -363,7 +363,7 @@ class SequenceSafetyRegressions(unittest.TestCase):
         self.assertAlmostEqual(result.elapsed_seconds, 0.4)
         self.assertEqual(len(self.provider.captures), 4)
         events = self.events()
-        with sqlite3.connect(self.root / 'sessions.sqlite3') as db:
+        with contextlib.closing(sqlite3.connect(self.root / 'sessions.sqlite3')) as db:
             self.assertEqual(db.execute('select count(*) from events').fetchone()[0], len(events))
             rows = db.execute('select ended_at, status from sessions').fetchall()
         self.assertEqual(len(rows), 3)
