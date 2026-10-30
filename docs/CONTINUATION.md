@@ -8,19 +8,30 @@
 - JSONL event log and SQLite session/event store.
 - Diagnostic ZIP export with five files; screenshots excluded by default and likely secrets/absolute paths redacted.
 - Offline unit tests for configuration, transitions, mocks, safety, persistence, redaction, export and simulated encounter.
+- Stage 1's 19-test suite passed on the target Windows laptop.
+
+## Completed in Stage 2A — read-only observer
+
+- Windows-only top-level window discovery using the XC2 game-title substring.
+- Window client-area geometry, process ID, foreground and minimized-state reporting.
+- One-shot foreground activation and screenshot capture using MSS.
+- PNG saved under artifacts/logs/screenshots by default.
+- screenshot_captured event persisted to JSONL and SQLite.
+- xc2bot windows and xc2bot observe CLI commands.
+- Unit tests use a fake window provider; actual Windows/Ryubing capture still requires acceptance testing on Mark's laptop.
 
 ## Explicit limitations
 
-- No actual emulator or game integration.
+- Stage 2A captures visible desktop pixels in the game window's client rectangle. The game window must be visible and unobscured; this is not off-screen capture.
+- Stage 2A sends no keyboard/controller input.
 - No screen recognition, targeting, combat timing, farming strategy or resonance automation.
 - Synchronous timeouts are detected only after a blocking action returns.
 - The emergency stop is an in-process stop signal, not a registered global Windows hotkey.
-- Windows 11 validation is still required; mock tests are not evidence of emulator compatibility.
 
 ## Next steps
 
-1. Run the documented PowerShell commands on the target Windows laptop.
-2. Compare the installed Yuzu/Ryujinx builds with the same game version and prepared save.
-3. Implement and validate screenshot capture and controller input behind the existing interfaces.
-4. Collect actual game screenshots before implementing state recognition.
+1. Validate xc2bot windows and xc2bot observe on the target Windows laptop with Ryubing and XC2 running.
+2. Inspect a real screenshot for crop, scaling, overlays and image clarity.
+3. Add keyboard input behind the existing controller interface only after the observer is reliable.
+4. Collect representative screenshots before implementing state recognition.
 5. Keep story progression under user control and stop on uncertain state.
