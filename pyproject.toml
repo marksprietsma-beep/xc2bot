@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A Windows-first, diagnostics-led XC2 farming automation foundation"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["mss>=10.0.0"]
 
 [project.scripts]
 xc2bot = "xc2bot.cli:main"
