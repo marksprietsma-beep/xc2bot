@@ -1,0 +1,25 @@
+{
+  "description": "Short manual movement test",
+  "steps": [
+    {
+      "action": "MOVE_FORWARD",
+      "duration_seconds": 0.25,
+      "delay_after_seconds": 0.2
+    },
+    {
+      "action": "MOVE_RIGHT",
+      "duration_seconds": 0.25,
+      "delay_after_seconds": 0.2
+    },
+    {
+      "action": "MOVE_FORWARD",
+      "duration_seconds": 0.25,
+      "delay_after_seconds": 0.2
+    },
+    {
+      "action": "MOVE_LEFT",
+      "duration_seconds": 0.25,
+      "delay_after_seconds": 0
+    }
+  ]
+}
