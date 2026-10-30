@@ -26,7 +26,7 @@
 - Windows SendInput adapter for single virtual-key down/up events.
 - No modifier keys, Windows keys, F12, or key combinations are accepted in the mapping.
 - Each action requires explicit --confirm and a 0.05–1.00 second hold duration.
-- The target Ryujinx window must already be foreground; the controller never steals focus.
+- The command automatically restores/activates the uniquely matched Ryujinx game window before input, so it can be launched from PowerShell without manually switching windows.
 - Foreground focus is rechecked during the hold.
 - Ctrl+Alt+F12 is polled as a physical emergency-stop chord.
 - Held keys are released in a finally cleanup path and again defensively by the action service.
@@ -40,7 +40,7 @@
 - One action per command; no automatic repeats or macros.
 - Maximum key hold is hard-coded to one second.
 - No modifier combinations; Ctrl+Alt+F12 is reserved for emergency stop.
-- The emulator must already be foreground; no focus stealing or auto-restore.
+- The emulator is activated automatically before input. If Windows denies activation, the command fails closed without sending a key.
 - No game-state recognition, combat logic, target selection, farming loop or story progression.
 - Screenshots remain outside diagnostic ZIP exports by default.
 - Real SendInput behaviour and emergency-stop detection still require acceptance testing on Mark's Windows laptop.
@@ -50,9 +50,9 @@
 1. Run the full test suite with Python 3.12.
 2. Copy config/keyboard.example.json to the git-ignored config/keyboard.json.
 3. Verify each mapping against the actual Ryujinx Input settings.
-4. Unpause XC2, move to a safe location, and make the Ryujinx game window foreground.
+4. Unpause XC2 and move to a safe location.
 5. Run xc2bot controls --mapping config/keyboard.json.
-6. Run one short action: xc2bot input --mapping config/keyboard.json --action MOVE_FORWARD --duration 0.25 --confirm.
+6. Run one short action from PowerShell; the command automatically activates the Ryujinx game window: xc2bot input --mapping config/keyboard.json --action MOVE_FORWARD --duration 0.25 --confirm.
 7. Inspect both screenshots and the matching JSONL/SQLite events.
 
 ## Next steps
